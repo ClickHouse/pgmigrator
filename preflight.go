@@ -1,23 +1,22 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
 )
 
-func findPgDump(path string) (string, error) {
+func findBinary(name, path string) (string, error) {
 	if path != "" {
 		if _, err := exec.LookPath(path); err != nil {
-			return "", fmt.Errorf("pg_dump not found at %q: %w", path, err)
+			return "", fmt.Errorf("%s not found at %q: %w", name, path, err)
 		}
 
 		return path, nil
 	}
 
-	resolved, err := exec.LookPath("pg_dump")
+	resolved, err := exec.LookPath(name)
 	if err != nil {
-		return "", errors.New("pg_dump not found in PATH; install it or pass --pg-dump /path/to/pg_dump")
+		return "", fmt.Errorf("%s not found in PATH; pass --%s /path/to/%s", name, name, name)
 	}
 
 	return resolved, nil

@@ -35,14 +35,23 @@ func run() error {
 				Name:  "pg-dump",
 				Usage: "path to pg_dump binary (default: search PATH)",
 			},
+			&cli.StringFlag{
+				Name:  "psql",
+				Usage: "path to psql binary (default: search PATH)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			pgDump, err := findPgDump(cmd.String("pg-dump"))
+			pgDump, err := findBinary("pg_dump", cmd.String("pg-dump"))
 			if err != nil {
 				return err
 			}
 
-			log.Info().Str("path", pgDump).Msg("using pg_dump")
+			psql, err := findBinary("psql", cmd.String("psql"))
+			if err != nil {
+				return err
+			}
+
+			log.Info().Str("pg_dump", pgDump).Str("psql", psql).Msg("found binaries")
 
 			cfg, err := loadConfig(cmd.String("config"))
 			if err != nil {
@@ -59,6 +68,12 @@ func run() error {
 			}
 
 			log.Info().Str("file", schemaFile).Msg("source schema dumped")
+
+			if loadErr := loadSchemaToTarget(ctx, psql, schemaFile, &cfg.Target); loadErr != nil {
+				return loadErr
+			}
+
+			log.Info().Msg("schema loaded to target")
 			return nil
 		},
 	}
