@@ -19,5 +19,8 @@ vendor/
 *.swp
 *.swo
 
+# Logs
+pgmigrator.log
+
 # OS
 .DS_Store
