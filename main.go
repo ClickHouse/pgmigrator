@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/jackc/pgx/v5"
@@ -23,7 +25,7 @@ func main() {
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			dsn := cmd.String("dsn")
 			if dsn == "" {
-				return fmt.Errorf("dsn is required")
+				return errors.New("dsn is required")
 			}
 
 			conn, err := pgx.Connect(ctx, dsn)
@@ -32,7 +34,7 @@ func main() {
 			}
 			defer conn.Close(ctx)
 
-			fmt.Println("connected successfully")
+			log.Println("connected successfully")
 			return nil
 		},
 	}
