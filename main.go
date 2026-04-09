@@ -2,32 +2,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/urfave/cli/v3"
 )
-
-func findPgDump(path string) (string, error) {
-	if path != "" {
-		if _, err := exec.LookPath(path); err != nil {
-			return "", fmt.Errorf("pg_dump not found at %q: %w", path, err)
-		}
-
-		return path, nil
-	}
-
-	resolved, err := exec.LookPath("pg_dump")
-	if err != nil {
-		return "", errors.New("pg_dump not found in PATH; install it or pass --pg-dump /path/to/pg_dump")
-	}
-
-	return resolved, nil
-}
 
 func main() {
 	app := &cli.Command{
@@ -35,9 +16,10 @@ func main() {
 		Usage: "PostgreSQL migration tool",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "dsn",
-				Usage:   "PostgreSQL connection string",
-				Sources: cli.EnvVars("PG_DSN"),
+				Name:     "config",
+				Usage:    "path to TOML config file",
+				Required: true,
+				Aliases:  []string{"c"},
 			},
 			&cli.StringFlag{
 				Name:  "pg-dump",
@@ -52,18 +34,28 @@ func main() {
 
 			log.Printf("using pg_dump: %s", pgDump)
 
-			dsn := cmd.String("dsn")
-			if dsn == "" {
-				return errors.New("dsn is required")
-			}
-
-			conn, err := pgx.Connect(ctx, dsn)
+			cfg, err := loadConfig(cmd.String("config"))
 			if err != nil {
-				return fmt.Errorf("connect: %w", err)
+				return err
 			}
-			defer conn.Close(ctx)
 
-			log.Println("connected successfully")
+			if promptErr := promptMissingPasswords(cfg); promptErr != nil {
+				return promptErr
+			}
+
+			sourcePool, err := pgxpool.New(ctx, cfg.Source.DSN())
+			if err != nil {
+				return fmt.Errorf("connect to source: %w", err)
+			}
+			defer sourcePool.Close()
+
+			targetPool, err := pgxpool.New(ctx, cfg.Target.DSN())
+			if err != nil {
+				return fmt.Errorf("connect to target: %w", err)
+			}
+			defer targetPool.Close()
+
+			log.Println("connected to source and target")
 			return nil
 		},
 	}
