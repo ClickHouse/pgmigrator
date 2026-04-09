@@ -25,7 +25,7 @@ type uniqueIndex struct {
 	IndexDef  string
 }
 
-func backupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGConfig) (string, error) {
+func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGConfig) (string, error) {
 	conn, err := pgx.Connect(ctx, cfg.DSN())
 	if err != nil {
 		return "", fmt.Errorf("connecting to target: %w", err)

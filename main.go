@@ -88,7 +88,7 @@ func migrate(ctx context.Context, log zerolog.Logger, cmd *cli.Command) error {
 	log.Info().Msg("schema loaded to target")
 
 	if cmd.Bool("backup-unique") {
-		backupFile, backupErr := backupUniqueConstraints(ctx, log, &cfg.Target)
+		backupFile, backupErr := BackupUniqueConstraints(ctx, log, &cfg.Target)
 		if backupErr != nil {
 			return backupErr
 		}
