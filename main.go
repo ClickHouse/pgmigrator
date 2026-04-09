@@ -39,46 +39,66 @@ func run() error {
 				Name:  "psql",
 				Usage: "path to psql binary (default: search PATH)",
 			},
+			&cli.BoolFlag{
+				Name:  "backup-unique",
+				Usage: "backup unique constraints and indexes from target to a SQL file",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			pgDump, err := findBinary("pg_dump", cmd.String("pg-dump"))
-			if err != nil {
-				return err
-			}
-
-			psql, err := findBinary("psql", cmd.String("psql"))
-			if err != nil {
-				return err
-			}
-
-			log.Info().Str("pg_dump", pgDump).Str("psql", psql).Msg("found binaries")
-
-			cfg, err := loadConfig(cmd.String("config"))
-			if err != nil {
-				return err
-			}
-
-			if promptErr := promptMissingPasswords(cfg); promptErr != nil {
-				return promptErr
-			}
-
-			schemaFile, err := dumpSourceSchema(ctx, pgDump, &cfg.Source)
-			if err != nil {
-				return err
-			}
-
-			log.Info().Str("file", schemaFile).Msg("source schema dumped")
-
-			if loadErr := loadSchemaToTarget(ctx, psql, schemaFile, &cfg.Target); loadErr != nil {
-				return loadErr
-			}
-
-			log.Info().Msg("schema loaded to target")
-			return nil
+			return migrate(ctx, log, cmd)
 		},
 	}
 
 	return app.Run(context.Background(), os.Args)
+}
+
+func migrate(ctx context.Context, log zerolog.Logger, cmd *cli.Command) error {
+	pgDump, err := findBinary("pg_dump", cmd.String("pg-dump"))
+	if err != nil {
+		return err
+	}
+
+	psql, err := findBinary("psql", cmd.String("psql"))
+	if err != nil {
+		return err
+	}
+
+	log.Info().Str("pg_dump", pgDump).Str("psql", psql).Msg("found binaries")
+
+	cfg, err := loadConfig(cmd.String("config"))
+	if err != nil {
+		return err
+	}
+
+	if promptErr := promptMissingPasswords(cfg); promptErr != nil {
+		return promptErr
+	}
+
+	schemaFile, err := dumpSourceSchema(ctx, pgDump, &cfg.Source)
+	if err != nil {
+		return err
+	}
+
+	log.Info().Str("file", schemaFile).Msg("source schema dumped")
+
+	if loadErr := loadSchemaToTarget(ctx, psql, schemaFile, &cfg.Target); loadErr != nil {
+		return loadErr
+	}
+
+	log.Info().Msg("schema loaded to target")
+
+	if cmd.Bool("backup-unique") {
+		backupFile, backupErr := backupUniqueConstraints(ctx, log, &cfg.Target)
+		if backupErr != nil {
+			return backupErr
+		}
+
+		if backupFile != "" {
+			log.Info().Str("file", backupFile).Msg("unique constraints backed up")
+		}
+	}
+
+	return nil
 }
 
 func main() {
