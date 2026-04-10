@@ -1,6 +1,6 @@
 # Binaries
 bin/
-pgmigrator
+/pgmigrator
 *.exe
 *.dll
 *.so
