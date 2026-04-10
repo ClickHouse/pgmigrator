@@ -114,24 +114,34 @@ func TestBackupUniqueConstraints(t *testing.T) {
 			log := zerolog.Nop()
 
 			// Run backup.
-			filename, err := BackupUniqueConstraints(ctx, log, cfg)
+			result, err := BackupUniqueConstraints(ctx, log, cfg)
 			require.NoError(t, err)
-			require.NotEmpty(t, filename)
-			t.Cleanup(func() { os.Remove(filename) })
+			require.NotNil(t, result)
+			t.Cleanup(func() {
+				os.Remove(result.DropFile)
+				os.Remove(result.RestoreFile)
+			})
 
-			content, err := os.ReadFile(filename)
-			require.NoError(t, err)
+			dropSQL := readFile(t, result.DropFile)
+			restoreSQL := readFile(t, result.RestoreFile)
 
-			sql := string(content)
-
-			assertDropSection(t, sql)
-			assertRestoreSection(t, sql)
-			assertRoundTrip(ctx, t, cfg, sql)
+			assertDropFile(t, dropSQL)
+			assertRestoreFile(t, restoreSQL)
+			assertRoundTrip(ctx, t, cfg, dropSQL, restoreSQL)
 		})
 	}
 }
 
-func assertDropSection(t *testing.T, sql string) {
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	return string(content)
+}
+
+func assertDropFile(t *testing.T, sql string) {
 	t.Helper()
 
 	// All five unique constraints should have DROP CONSTRAINT statements.
@@ -149,7 +159,7 @@ func assertDropSection(t *testing.T, sql string) {
 	assert.Contains(t, sql, "idx_events_session")
 }
 
-func assertRestoreSection(t *testing.T, sql string) {
+func assertRestoreFile(t *testing.T, sql string) {
 	t.Helper()
 
 	// Indexes are recreated via CREATE UNIQUE INDEX.
@@ -162,7 +172,7 @@ func assertRestoreSection(t *testing.T, sql string) {
 	assert.Contains(t, sql, "DEFERRABLE INITIALLY DEFERRED")
 }
 
-func assertRoundTrip(ctx context.Context, t *testing.T, cfg *PGConfig, sql string) {
+func assertRoundTrip(ctx context.Context, t *testing.T, cfg *PGConfig, dropSQL, restoreSQL string) {
 	t.Helper()
 
 	conn, err := pgx.Connect(ctx, cfg.DSN())
@@ -173,19 +183,16 @@ func assertRoundTrip(ctx context.Context, t *testing.T, cfg *PGConfig, sql strin
 	assert.Equal(t, expectedUniqueConstraints, countUniqueConstraints(ctx, t, conn))
 	assert.Equal(t, expectedStandaloneUniqueIndexes, countStandaloneUniqueIndexes(ctx, t, conn))
 
-	// Execute DROP section (everything before SECTION 2).
-	dropEnd := strings.Index(sql, "-- SECTION 2: RESTORE")
-	require.Positive(t, dropEnd)
-
-	_, err = conn.Exec(ctx, sql[:dropEnd])
+	// Execute drop file.
+	_, err = conn.Exec(ctx, dropSQL)
 	require.NoError(t, err)
 
 	// Everything should be gone.
 	assert.Equal(t, 0, countUniqueConstraints(ctx, t, conn))
 	assert.Equal(t, 0, countStandaloneUniqueIndexes(ctx, t, conn))
 
-	// Execute RESTORE section.
-	_, err = conn.Exec(ctx, sql[dropEnd:])
+	// Execute restore file.
+	_, err = conn.Exec(ctx, restoreSQL)
 	require.NoError(t, err)
 
 	// Everything should be back.

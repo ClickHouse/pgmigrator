@@ -25,26 +25,32 @@ type uniqueIndex struct {
 	IndexDef  string
 }
 
-func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGConfig) (string, error) {
+// BackupResult holds the filenames of the generated drop and restore SQL files.
+type BackupResult struct {
+	DropFile    string
+	RestoreFile string
+}
+
+func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGConfig) (*BackupResult, error) {
 	conn, err := pgx.Connect(ctx, cfg.DSN())
 	if err != nil {
-		return "", fmt.Errorf("connecting to target: %w", err)
+		return nil, fmt.Errorf("connecting to target: %w", err)
 	}
 	defer conn.Close(ctx)
 
 	constraints, err := fetchUniqueConstraints(ctx, conn)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	indexes, err := fetchStandaloneUniqueIndexes(ctx, conn)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if len(constraints) == 0 && len(indexes) == 0 {
 		log.Info().Msg("no unique constraints or standalone unique indexes found")
-		return "", nil
+		return &BackupResult{}, nil
 	}
 
 	log.Info().
@@ -52,13 +58,19 @@ func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGCon
 		Int("standalone_indexes", len(indexes)).
 		Msg("found unique constraints and indexes")
 
-	filename := fmt.Sprintf("unique-constraints-backup-%s.sql", time.Now().Format("02_01_06_15_04_05"))
+	ts := time.Now().Format("02_01_06_15_04_05")
+	dropFile := fmt.Sprintf("drop-unique-%s.sql", ts)
+	restoreFile := fmt.Sprintf("restore-unique-%s.sql", ts)
 
-	if writeErr := writeBackupFile(filename, constraints, indexes); writeErr != nil {
-		return "", writeErr
+	if writeErr := writeDropFile(dropFile, constraints, indexes); writeErr != nil {
+		return nil, writeErr
 	}
 
-	return filename, nil
+	if writeErr := writeRestoreFile(restoreFile, constraints, indexes); writeErr != nil {
+		return nil, writeErr
+	}
+
+	return &BackupResult{DropFile: dropFile, RestoreFile: restoreFile}, nil
 }
 
 func fetchUniqueConstraints(ctx context.Context, conn *pgx.Conn) ([]uniqueConstraint, error) {
@@ -147,38 +159,19 @@ ORDER BY n.nspname, i.relname`
 	return indexes, nil
 }
 
-func writeBackupFile(filename string, constraints []uniqueConstraint, indexes []uniqueIndex) error {
+func writeDropFile(filename string, constraints []uniqueConstraint, indexes []uniqueIndex) error {
 	var b strings.Builder
 
-	b.WriteString("-- pgmigrator: unique constraint and index backup\n")
+	b.WriteString("-- pgmigrator: drop unique constraints and indexes\n")
 	fmt.Fprintf(&b, "-- Generated: %s\n", time.Now().Format(time.RFC3339))
-	b.WriteString("--\n")
-	b.WriteString("-- DROP order: constraints first (auto-drops backing index), then standalone indexes\n")
-	b.WriteString("-- RESTORE order: all indexes first, then re-attach constraints via USING INDEX\n\n")
-
-	writeDropSection(&b, constraints, indexes)
-	writeRestoreSection(&b, constraints, indexes)
-
-	//nolint:gosec // backup file does not need restricted permissions
-	if err := os.WriteFile(filename, []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("writing backup file %q: %w", filename, err)
-	}
-
-	return nil
-}
-
-func writeDropSection(b *strings.Builder, constraints []uniqueConstraint, indexes []uniqueIndex) {
-	b.WriteString("-- ============================================================\n")
-	b.WriteString("-- SECTION 1: DROP\n")
-	b.WriteString("-- Run these statements to remove unique constraints before CDC\n")
-	b.WriteString("-- ============================================================\n\n")
+	b.WriteString("-- Run these statements to remove unique constraints before CDC\n\n")
 	b.WriteString("BEGIN;\n\n")
 
 	if len(constraints) > 0 {
 		b.WriteString("-- Unique constraints (dropping also removes their backing index)\n")
 
 		for _, uc := range constraints {
-			fmt.Fprintf(b, "ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s;\n",
+			fmt.Fprintf(&b, "ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s;\n",
 				uc.TableName, quoteIdent(uc.ConstraintName))
 		}
 
@@ -189,20 +182,28 @@ func writeDropSection(b *strings.Builder, constraints []uniqueConstraint, indexe
 		b.WriteString("-- Standalone unique indexes (not backing any constraint)\n")
 
 		for _, ui := range indexes {
-			fmt.Fprintf(b, "DROP INDEX IF EXISTS %s;\n", ui.IndexName)
+			fmt.Fprintf(&b, "DROP INDEX IF EXISTS %s;\n", ui.IndexName)
 		}
 
 		b.WriteString("\n")
 	}
 
-	b.WriteString("COMMIT;\n\n")
+	b.WriteString("COMMIT;\n")
+
+	//nolint:gosec // backup file does not need restricted permissions
+	if err := os.WriteFile(filename, []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("writing drop file %q: %w", filename, err)
+	}
+
+	return nil
 }
 
-func writeRestoreSection(b *strings.Builder, constraints []uniqueConstraint, indexes []uniqueIndex) {
-	b.WriteString("-- ============================================================\n")
-	b.WriteString("-- SECTION 2: RESTORE\n")
-	b.WriteString("-- Run these statements to recreate constraints after CDC\n")
-	b.WriteString("-- ============================================================\n\n")
+func writeRestoreFile(filename string, constraints []uniqueConstraint, indexes []uniqueIndex) error {
+	var b strings.Builder
+
+	b.WriteString("-- pgmigrator: restore unique constraints and indexes\n")
+	fmt.Fprintf(&b, "-- Generated: %s\n", time.Now().Format(time.RFC3339))
+	b.WriteString("-- Run these statements to recreate constraints after CDC\n\n")
 
 	// Indexes outside transaction so CONCURRENTLY can be added if desired.
 	if len(constraints) > 0 || len(indexes) > 0 {
@@ -225,7 +226,7 @@ func writeRestoreSection(b *strings.Builder, constraints []uniqueConstraint, ind
 		b.WriteString("BEGIN;\n\n")
 
 		for _, uc := range constraints {
-			fmt.Fprintf(b, "ALTER TABLE %s ADD CONSTRAINT %s UNIQUE USING INDEX %s",
+			fmt.Fprintf(&b, "ALTER TABLE %s ADD CONSTRAINT %s UNIQUE USING INDEX %s",
 				uc.TableName, quoteIdent(uc.ConstraintName), quoteIdent(uc.IndexName))
 
 			if uc.Deferrable {
@@ -240,6 +241,13 @@ func writeRestoreSection(b *strings.Builder, constraints []uniqueConstraint, ind
 
 		b.WriteString("\nCOMMIT;\n")
 	}
+
+	//nolint:gosec // backup file does not need restricted permissions
+	if err := os.WriteFile(filename, []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("writing restore file %q: %w", filename, err)
+	}
+
+	return nil
 }
 
 func quoteIdent(name string) string {
