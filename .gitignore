@@ -6,6 +6,11 @@ pgmigrator
 *.so
 *.dylib
 
+# Generated SQL files
+source-schema-dump-*.sql
+drop-unique-*.sql
+restore-unique-*.sql
+
 # Test
 *.test
 *.out

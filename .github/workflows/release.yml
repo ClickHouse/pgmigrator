@@ -33,7 +33,7 @@ jobs:
             output="pgmigrator-${version}-${os}-${arch}"
             mkdir -p "dist/${output}"
 
-            GOOS=$os GOARCH=$arch go build -ldflags "$ldflags" -o "dist/${output}/pgmigrator" .
+            GOOS=$os GOARCH=$arch go build -ldflags "$ldflags" -o "dist/${output}/pgmigrator" ./cmd/pgmigrator
 
             tar -czf "dist/${output}.tar.gz" -C dist "${output}"
           done

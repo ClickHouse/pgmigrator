@@ -1,4 +1,4 @@
-package main
+package migrate_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ClickHouse/pgmigrator/internal/migrate"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,7 @@ func discoverSchemas(t *testing.T) []string {
 	return schemas
 }
 
-func pgConfigFromContainer(ctx context.Context, t *testing.T, ctr *postgres.PostgresContainer) *PGConfig {
+func pgConfigFromContainer(ctx context.Context, t *testing.T, ctr *postgres.PostgresContainer) *migrate.PGConfig {
 	t.Helper()
 
 	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
@@ -43,7 +44,7 @@ func pgConfigFromContainer(ctx context.Context, t *testing.T, ctr *postgres.Post
 
 	pass, _ := u.User.Password()
 
-	return &PGConfig{
+	return &migrate.PGConfig{
 		Hostname: u.Hostname(),
 		Port:     uint16(port),
 		Username: u.User.Username(),
@@ -142,7 +143,7 @@ func runBackupTest(t *testing.T, schemaFile, pgVersion string) {
 		"schema %s has no unique constraints or indexes to test", schemaFile)
 
 	// Run backup.
-	result, err := BackupUniqueConstraints(ctx, zerolog.Nop(), cfg, t.TempDir())
+	result, err := migrate.BackupUniqueConstraints(ctx, zerolog.Nop(), cfg, t.TempDir())
 	require.NoError(t, err)
 	require.NotEmpty(t, result.DropFile)
 	require.NotEmpty(t, result.RestoreFile)
@@ -189,7 +190,7 @@ func assertRestoreSQL(t *testing.T, sql string, constraints int) {
 func assertRoundTrip(
 	ctx context.Context,
 	t *testing.T,
-	cfg *PGConfig,
+	cfg *migrate.PGConfig,
 	dropSQL, restoreSQL string,
 	baselineConstraints, baselineIndexes int,
 ) {

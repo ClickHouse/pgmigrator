@@ -5,7 +5,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o bin/pgmigrator .
+	go build -ldflags "$(LDFLAGS)" -o bin/pgmigrator ./cmd/pgmigrator
 
 test:
 	go test ./...
@@ -19,6 +19,6 @@ add_test_case:
 		exit 1; \
 	fi
 	@name=$$(echo "$(URL)" | sed 's|.*://||; s|.*/||; s|\?.*||'); \
-	outfile="testdata/schemas/$${name}.sql"; \
+	outfile="internal/migrate/testdata/schemas/$${name}.sql"; \
 	pg_dump --schema-only --no-owner --no-privileges "$(URL)" > "$${outfile}" && \
 	echo "Added $${outfile}"
