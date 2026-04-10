@@ -6,6 +6,14 @@ A PostgreSQL schema migration tool that dumps the source database schema and loa
 
 When running Change Data Capture (CDC) with an ELT model, unique constraints and indexes on the target database cause failures due to out-of-order or duplicate data. pgmigrator automates the schema transfer and generates ready-to-use SQL files to drop and later restore unique constraints and indexes.
 
+## Install
+
+```
+curl -fsSL https://raw.githubusercontent.com/ClickHouse/pgmigrator/main/install.sh | sh
+```
+
+This downloads the latest release for your OS/architecture, verifies the SHA256 checksum, and installs the binary to `~/.local/bin/pgmigrator`.
+
 ## Usage
 
 ```
