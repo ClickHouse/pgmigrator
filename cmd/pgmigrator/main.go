@@ -29,38 +29,88 @@ func run() error {
 		Name:    "pgmigrator",
 		Usage:   "PostgreSQL migration tool",
 		Version: version + " (" + commit + ")",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:     "config",
-				Usage:    "path to TOML config file",
-				Required: true,
-				Aliases:  []string{"c"},
+		Commands: []*cli.Command{
+			{
+				Name:  "init",
+				Usage: "generate an empty config TOML file",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "output",
+						Usage:   "output file path",
+						Value:   "pgmigrator.toml",
+						Aliases: []string{"o"},
+					},
+				},
+				Action: func(_ context.Context, cmd *cli.Command) error {
+					return generateConfig(cmd.String("output"))
+				},
 			},
-			&cli.StringFlag{
-				Name:  "pg-dump",
-				Usage: "path to pg_dump binary (default: search PATH)",
+			{
+				Name:  "migrate",
+				Usage: "run the migration",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "config",
+						Usage:    "path to TOML config file",
+						Required: true,
+						Aliases:  []string{"c"},
+					},
+					&cli.StringFlag{
+						Name:  "pg-dump",
+						Usage: "path to pg_dump binary (default: search PATH)",
+					},
+					&cli.StringFlag{
+						Name:  "psql",
+						Usage: "path to psql binary (default: search PATH)",
+					},
+					&cli.BoolFlag{
+						Name:  "backup-unique",
+						Value: true,
+						Usage: "backup unique constraints and indexes from target to a SQL file",
+					},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					return migrate.Run(ctx, log, migrate.Options{
+						ConfigPath:   cmd.String("config"),
+						PgDumpPath:   cmd.String("pg-dump"),
+						PsqlPath:     cmd.String("psql"),
+						BackupUnique: cmd.Bool("backup-unique"),
+					})
+				},
 			},
-			&cli.StringFlag{
-				Name:  "psql",
-				Usage: "path to psql binary (default: search PATH)",
-			},
-			&cli.BoolFlag{
-				Name:  "backup-unique",
-				Value: true,
-				Usage: "backup unique constraints and indexes from target to a SQL file",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return migrate.Run(ctx, log, migrate.Options{
-				ConfigPath:   cmd.String("config"),
-				PgDumpPath:   cmd.String("pg-dump"),
-				PsqlPath:     cmd.String("psql"),
-				BackupUnique: cmd.Bool("backup-unique"),
-			})
 		},
 	}
 
 	return app.Run(context.Background(), os.Args)
+}
+
+const configTemplate = `[source]
+hostname = ""
+port = 5432
+username = ""
+password = ""
+dbname = ""
+
+[target]
+hostname = ""
+port = 5432
+username = ""
+password = ""
+dbname = ""
+`
+
+func generateConfig(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("file %q already exists", path)
+	}
+
+	if err := os.WriteFile(path, []byte(configTemplate), 0o600); err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "wrote %s\n", path)
+
+	return nil
 }
 
 func main() {

@@ -16,8 +16,17 @@ This downloads the latest release for your OS/architecture, verifies the SHA256 
 
 ## Usage
 
+### Generate a config file
+
 ```
-pgmigrator -c config.toml
+pgmigrator init                    # writes pgmigrator.toml
+pgmigrator init -o myconfig.toml   # custom output path
+```
+
+### Run a migration
+
+```
+pgmigrator migrate -c config.toml
 ```
 
 This will:
@@ -28,7 +37,7 @@ This will:
    - `drop-unique-<timestamp>.sql` -- run before CDC to remove unique constraints/indexes
    - `restore-unique-<timestamp>.sql` -- run after CDC to recreate them
 
-### Flags
+### Flags (migrate)
 
 | Flag | Default | Description |
 |------|---------|-------------|
