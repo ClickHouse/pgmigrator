@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/BurntSushi/toml"
@@ -12,22 +14,37 @@ import (
 )
 
 type PGConfig struct {
-	Hostname string `toml:"hostname"`
-	Port     uint16 `toml:"port"`
-	Username string `toml:"username"`
-	Password string `toml:"password"`
-	DBName   string `toml:"dbname"`
+	Hostname string `toml:"hostname" json:"hostname"`
+	Port     uint16 `toml:"port"     json:"port"`
+	Username string `toml:"username" json:"username"`
+	Password string `toml:"password" json:"password"`
+	DBName   string `toml:"dbname"   json:"dbname"`
 }
 
 type Config struct {
-	Source PGConfig `toml:"source"`
-	Target PGConfig `toml:"target"`
+	Source PGConfig `toml:"source" json:"source"`
+	Target PGConfig `toml:"target" json:"target"`
 }
 
 func loadConfig(path string) (*Config, error) {
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		return nil, fmt.Errorf("reading config %q: %w", path, err)
+
+	switch filepath.Ext(path) {
+	case ".toml":
+		if _, err := toml.DecodeFile(path, &cfg); err != nil {
+			return nil, fmt.Errorf("reading config %q: %w", path, err)
+		}
+	case ".json":
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("reading config %q: %w", path, readErr)
+		}
+
+		if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
+			return nil, fmt.Errorf("parsing config %q: %w", path, unmarshalErr)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported config format %q: use .toml or .json", path)
 	}
 
 	if err := validatePGConfig("source", &cfg.Source); err != nil {
