@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +32,9 @@ type BackupResult struct {
 	RestoreFile string
 }
 
-func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGConfig) (*BackupResult, error) {
+func BackupUniqueConstraints(
+	ctx context.Context, log zerolog.Logger, cfg *PGConfig, outDir string,
+) (*BackupResult, error) {
 	conn, err := pgx.Connect(ctx, cfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("connecting to target: %w", err)
@@ -59,8 +62,8 @@ func BackupUniqueConstraints(ctx context.Context, log zerolog.Logger, cfg *PGCon
 		Msg("found unique constraints and indexes")
 
 	ts := time.Now().Format("02_01_06_15_04_05")
-	dropFile := fmt.Sprintf("drop-unique-%s.sql", ts)
-	restoreFile := fmt.Sprintf("restore-unique-%s.sql", ts)
+	dropFile := filepath.Join(outDir, fmt.Sprintf("drop-unique-%s.sql", ts))
+	restoreFile := filepath.Join(outDir, fmt.Sprintf("restore-unique-%s.sql", ts))
 
 	if writeErr := writeDropFile(dropFile, constraints, indexes); writeErr != nil {
 		return nil, writeErr

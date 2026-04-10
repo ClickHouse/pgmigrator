@@ -41,6 +41,7 @@ func run() error {
 			},
 			&cli.BoolFlag{
 				Name:  "backup-unique",
+				Value: true,
 				Usage: "backup unique constraints and indexes from target to a SQL file",
 			},
 		},
@@ -88,7 +89,7 @@ func migrate(ctx context.Context, log zerolog.Logger, cmd *cli.Command) error {
 	log.Info().Msg("schema loaded to target")
 
 	if cmd.Bool("backup-unique") {
-		result, backupErr := BackupUniqueConstraints(ctx, log, &cfg.Target)
+		result, backupErr := BackupUniqueConstraints(ctx, log, &cfg.Target, ".")
 		if backupErr != nil {
 			return backupErr
 		}

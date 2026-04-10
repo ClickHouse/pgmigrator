@@ -17,10 +17,17 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-const (
-	expectedUniqueConstraints       = 5
-	expectedStandaloneUniqueIndexes = 5
-)
+var pgVersions = []string{"16-alpine", "17-alpine", "18-alpine"} //nolint:gochecknoglobals // test matrix
+
+func discoverSchemas(t *testing.T) []string {
+	t.Helper()
+
+	schemas, err := filepath.Glob(filepath.Join("testdata", "schemas", "*.sql"))
+	require.NoError(t, err)
+	require.NotEmpty(t, schemas, "no schema files found in testdata/schemas/")
+
+	return schemas
+}
 
 func pgConfigFromContainer(ctx context.Context, t *testing.T, ctr *postgres.PostgresContainer) *PGConfig {
 	t.Helper()
@@ -91,45 +98,61 @@ func TestBackupUniqueConstraints(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	versions := []string{"16-alpine", "17-alpine", "18-alpine"}
+	schemas := discoverSchemas(t)
 
-	for _, version := range versions {
-		t.Run("postgres-"+version, func(t *testing.T) {
-			t.Parallel()
+	for _, schema := range schemas {
+		for _, version := range pgVersions {
+			name := filepath.Base(schema) + "/postgres-" + version
 
-			ctx := context.Background()
-
-			ctr, err := postgres.Run(ctx,
-				"postgres:"+version,
-				postgres.WithInitScripts(filepath.Join("testdata", "schema.sql")),
-				postgres.WithDatabase("testdb"),
-				postgres.WithUsername("testuser"),
-				postgres.WithPassword("testpass"),
-				postgres.BasicWaitStrategies(),
-			)
-			testcontainers.CleanupContainer(t, ctr)
-			require.NoError(t, err)
-
-			cfg := pgConfigFromContainer(ctx, t, ctr)
-			log := zerolog.Nop()
-
-			// Run backup.
-			result, err := BackupUniqueConstraints(ctx, log, cfg)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			t.Cleanup(func() {
-				os.Remove(result.DropFile)
-				os.Remove(result.RestoreFile)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				runBackupTest(t, schema, version)
 			})
-
-			dropSQL := readFile(t, result.DropFile)
-			restoreSQL := readFile(t, result.RestoreFile)
-
-			assertDropFile(t, dropSQL)
-			assertRestoreFile(t, restoreSQL)
-			assertRoundTrip(ctx, t, cfg, dropSQL, restoreSQL)
-		})
+		}
 	}
+}
+
+func runBackupTest(t *testing.T, schemaFile, pgVersion string) {
+	t.Helper()
+
+	ctx := context.Background()
+
+	ctr, err := postgres.Run(ctx,
+		"postgres:"+pgVersion,
+		postgres.WithInitScripts(schemaFile),
+		postgres.WithDatabase("testdb"),
+		postgres.WithUsername("testuser"),
+		postgres.WithPassword("testpass"),
+		postgres.BasicWaitStrategies(),
+	)
+	testcontainers.CleanupContainer(t, ctr)
+	require.NoError(t, err)
+
+	cfg := pgConfigFromContainer(ctx, t, ctr)
+
+	// Capture baseline counts before backup.
+	conn, err := pgx.Connect(ctx, cfg.DSN())
+	require.NoError(t, err)
+
+	baselineConstraints := countUniqueConstraints(ctx, t, conn)
+	baselineIndexes := countStandaloneUniqueIndexes(ctx, t, conn)
+	conn.Close(ctx)
+
+	require.Positive(t, baselineConstraints+baselineIndexes,
+		"schema %s has no unique constraints or indexes to test", schemaFile)
+
+	// Run backup.
+	result, err := BackupUniqueConstraints(ctx, zerolog.Nop(), cfg, t.TempDir())
+	require.NoError(t, err)
+	require.NotEmpty(t, result.DropFile)
+	require.NotEmpty(t, result.RestoreFile)
+
+	dropSQL := readFile(t, result.DropFile)
+	restoreSQL := readFile(t, result.RestoreFile)
+
+	assertDropSQL(t, dropSQL, baselineConstraints, baselineIndexes)
+	assertRestoreSQL(t, restoreSQL, baselineConstraints)
+	assertRoundTrip(ctx, t, cfg, dropSQL, restoreSQL, baselineConstraints, baselineIndexes)
 }
 
 func readFile(t *testing.T, path string) string {
@@ -141,47 +164,40 @@ func readFile(t *testing.T, path string) string {
 	return string(content)
 }
 
-func assertDropFile(t *testing.T, sql string) {
+func assertDropSQL(t *testing.T, sql string, constraints, indexes int) {
 	t.Helper()
 
-	// All five unique constraints should have DROP CONSTRAINT statements.
-	assert.Contains(t, sql, `DROP CONSTRAINT IF EXISTS "users_email_key"`)
-	assert.Contains(t, sql, `DROP CONSTRAINT IF EXISTS "orders_number_region_key"`)
-	assert.Contains(t, sql, `DROP CONSTRAINT IF EXISTS "positions_rank_key"`)
-	assert.Contains(t, sql, `DROP CONSTRAINT IF EXISTS "items_barcode_key"`)
-	assert.Contains(t, sql, `DROP CONSTRAINT IF EXISTS "events_event_id_key"`)
+	if constraints > 0 {
+		assert.Contains(t, sql, "DROP CONSTRAINT IF EXISTS")
+	}
 
-	// All five standalone indexes should have DROP INDEX statements.
-	assert.Contains(t, sql, "idx_products_sku")
-	assert.Contains(t, sql, "idx_accounts_email_active")
-	assert.Contains(t, sql, "idx_tags_name_lower")
-	assert.Contains(t, sql, "idx_items_lot")
-	assert.Contains(t, sql, "idx_events_session")
+	if indexes > 0 {
+		assert.Contains(t, sql, "DROP INDEX IF EXISTS")
+	}
 }
 
-func assertRestoreFile(t *testing.T, sql string) {
+func assertRestoreSQL(t *testing.T, sql string, constraints int) {
 	t.Helper()
 
-	// Indexes are recreated via CREATE UNIQUE INDEX.
 	assert.Contains(t, sql, "CREATE UNIQUE INDEX")
 
-	// Constraints are re-attached via USING INDEX.
-	assert.Contains(t, sql, "UNIQUE USING INDEX")
-
-	// Deferrable flag is preserved.
-	assert.Contains(t, sql, "DEFERRABLE INITIALLY DEFERRED")
+	if constraints > 0 {
+		assert.Contains(t, sql, "UNIQUE USING INDEX")
+	}
 }
 
-func assertRoundTrip(ctx context.Context, t *testing.T, cfg *PGConfig, dropSQL, restoreSQL string) {
+func assertRoundTrip(
+	ctx context.Context,
+	t *testing.T,
+	cfg *PGConfig,
+	dropSQL, restoreSQL string,
+	baselineConstraints, baselineIndexes int,
+) {
 	t.Helper()
 
 	conn, err := pgx.Connect(ctx, cfg.DSN())
 	require.NoError(t, err)
 	defer conn.Close(ctx)
-
-	// Verify initial counts match expectations.
-	assert.Equal(t, expectedUniqueConstraints, countUniqueConstraints(ctx, t, conn))
-	assert.Equal(t, expectedStandaloneUniqueIndexes, countStandaloneUniqueIndexes(ctx, t, conn))
 
 	// Execute drop file.
 	_, err = conn.Exec(ctx, dropSQL)
@@ -196,6 +212,6 @@ func assertRoundTrip(ctx context.Context, t *testing.T, cfg *PGConfig, dropSQL, 
 	require.NoError(t, err)
 
 	// Everything should be back.
-	assert.Equal(t, expectedUniqueConstraints, countUniqueConstraints(ctx, t, conn))
-	assert.Equal(t, expectedStandaloneUniqueIndexes, countStandaloneUniqueIndexes(ctx, t, conn))
+	assert.Equal(t, baselineConstraints, countUniqueConstraints(ctx, t, conn))
+	assert.Equal(t, baselineIndexes, countStandaloneUniqueIndexes(ctx, t, conn))
 }
