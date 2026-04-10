@@ -1,7 +1,11 @@
 .PHONY: build test lint add_test_case
 
+VERSION ?= dev
+COMMIT  ?= $(shell git rev-parse --short HEAD)
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+
 build:
-	go build -o bin/pgmigrator .
+	go build -ldflags "$(LDFLAGS)" -o bin/pgmigrator .
 
 test:
 	go test ./...

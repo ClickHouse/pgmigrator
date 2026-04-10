@@ -10,6 +10,9 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+var version = "dev"
+var commit = "unknown" //nolint:gochecknoglobals // set by -ldflags at build time
+
 func run() error {
 	logFile, logErr := os.OpenFile("pgmigrator.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if logErr != nil {
@@ -22,8 +25,9 @@ func run() error {
 	log := zerolog.New(multi).With().Timestamp().Logger()
 
 	app := &cli.Command{
-		Name:  "pgmigrator",
-		Usage: "PostgreSQL migration tool",
+		Name:    "pgmigrator",
+		Usage:   "PostgreSQL migration tool",
+		Version: version + " (" + commit + ")",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "config",
