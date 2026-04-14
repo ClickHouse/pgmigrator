@@ -42,6 +42,14 @@ jobs:
                 https://github.com/postgres/postgres.git /tmp/postgres
               cd /tmp/postgres
 
+              # Static libpq: use libpq_st instead of libpq_so
+              sed -i "s/link_with: \[libpq_so\]/link_with: [libpq_st]/" \
+                src/interfaces/libpq/meson.build
+              # libpgcommon.a renames encoding funcs to *_private (normally
+              # resolved from libpq.so). Drop the rename for fully static link.
+              sed -i "/-DUSE_PRIVATE_ENCODING_FUNCS/d" \
+                src/common/meson.build
+
               meson setup build \
                 --default-library=static \
                 --prefer-static \
