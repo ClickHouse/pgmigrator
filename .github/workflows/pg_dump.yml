@@ -1,0 +1,117 @@
+name: pg_dump static build
+
+on:
+  workflow_dispatch:
+    inputs:
+      pg_version:
+        description: "PostgreSQL branch"
+        required: true
+        default: "REL_18_STABLE"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build static pg_dump in Alpine
+        run: |
+          mkdir -p dist
+          docker run --rm --platform linux/${{ matrix.arch }} \
+            -v "$PWD/dist:/dist" \
+            alpine:3.21 sh -c '
+              set -ex
+
+              apk add --no-cache \
+                gcc musl-dev meson ninja pkgconf git \
+                zlib-dev zlib-static \
+                openssl-dev openssl-libs-static \
+                lz4-dev lz4-static \
+                zstd-dev zstd-static \
+                bison flex perl linux-headers
+
+              git clone --depth 1 --branch "${{ inputs.pg_version }}" \
+                https://github.com/postgres/postgres.git /tmp/postgres
+              cd /tmp/postgres
+
+              meson setup build \
+                --default-library=static \
+                --prefer-static \
+                -Dc_link_args=-static \
+                -Dssl=openssl \
+                -Dzlib=enabled \
+                -Dlz4=enabled \
+                -Dzstd=enabled \
+                -Dreadline=disabled \
+                -Dnls=disabled \
+                -Dgssapi=disabled \
+                -Dldap=disabled \
+                -Dlibcurl=disabled \
+                -Dpam=disabled \
+                -Dsystemd=disabled \
+                -Dselinux=disabled \
+                -Duuid=none \
+                -Dlibxml=disabled \
+                -Dlibxslt=disabled \
+                -Dicu=disabled \
+                -Dlibnuma=disabled \
+                -Dliburing=disabled
+
+              ninja -C build \
+                src/bin/pg_dump/pg_dump \
+                src/bin/pg_dump/pg_dumpall \
+                src/bin/pg_dump/pg_restore
+
+              cp build/src/bin/pg_dump/pg_dump /dist/
+              cp build/src/bin/pg_dump/pg_dumpall /dist/
+              cp build/src/bin/pg_dump/pg_restore /dist/
+            '
+
+      - name: Verify static linking
+        run: |
+          file dist/pg_dump
+          file dist/pg_dump | grep -q 'statically linked'
+
+      - name: Package
+        run: |
+          tar -czf "pg_dump-${{ inputs.pg_version }}-linux-${{ matrix.arch }}.tar.gz" \
+            -C dist pg_dump pg_dumpall pg_restore
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg_dump-${{ matrix.arch }}
+          path: "*.tar.gz"
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: sha256sum *.tar.gz > checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "pg_dump/${{ inputs.pg_version }}"
+          name: "pg_dump ${{ inputs.pg_version }} (static)"
+          body: |
+            Static builds of pg_dump, pg_dumpall, pg_restore from PostgreSQL `${{ inputs.pg_version }}`.
+
+            Built with musl libc (Alpine) for fully static, portable binaries.
+            Includes OpenSSL, zlib, lz4, zstd support.
+          files: |
+            *.tar.gz
+            checksums.txt
