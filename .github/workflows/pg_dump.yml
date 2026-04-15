@@ -13,19 +13,19 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
     steps:
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-
       - name: Build static pg_dump in Alpine
         run: |
           mkdir -p dist
-          docker run --rm --platform linux/${{ matrix.arch }} \
+          docker run --rm \
             -v "$PWD/dist:/dist" \
             alpine:3.21 sh -c '
               set -ex
@@ -94,7 +94,7 @@ jobs:
             -C dist pg_dump pg_dumpall pg_restore
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pg_dump-${{ matrix.arch }}
           path: "*.tar.gz"
@@ -103,7 +103,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
@@ -111,7 +111,7 @@ jobs:
         run: sha256sum *.tar.gz > checksums.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: "pg_dump/${{ inputs.pg_version }}"
           name: "pg_dump ${{ inputs.pg_version }} (static)"
