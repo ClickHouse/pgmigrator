@@ -37,6 +37,12 @@ This will:
    - `drop-unique-<timestamp>.sql` -- run before CDC to remove unique constraints/indexes
    - `restore-unique-<timestamp>.sql` -- run after CDC to recreate them
 
+### Global flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--log-file` | *(stderr only)* | Also write structured logs to this file |
+
 ### Flags (migrate)
 
 | Flag | Default | Description |
@@ -44,7 +50,7 @@ This will:
 | `-c, --config` | *(required)* | Path to TOML or JSON config file |
 | `--pg-dump` | search `$PATH` | Path to `pg_dump` binary |
 | `--psql` | search `$PATH` | Path to `psql` binary |
-| `--backup-unique` | `true` | Back up unique constraints and indexes to SQL files |
+| `--backup-unique` | `false` | Back up unique constraints and indexes to SQL files |
 
 ### Config file
 
@@ -97,6 +103,53 @@ COMMIT;
 ```
 
 Partial indexes, expression indexes, multi-column indexes, and `DEFERRABLE` constraints are all preserved.
+
+## Library usage
+
+The migration logic is exposed as a Go package at `github.com/ClickHouse/pgmigrator/migrate`, so you can embed it in your own tooling without shelling out to the CLI.
+
+```
+go get github.com/ClickHouse/pgmigrator/migrate
+```
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+
+    "github.com/ClickHouse/pgmigrator/migrate"
+    "github.com/rs/zerolog"
+)
+
+func main() {
+    logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+
+    result, err := migrate.Run(context.Background(), migrate.Options{
+        Source: migrate.PGConfig{
+            Hostname: "source-db.example.com", Port: 5432,
+            Username: "replicator", Password: "...", DBName: "production",
+        },
+        Target: migrate.PGConfig{
+            Hostname: "target-db.example.com", Port: 5432,
+            Username: "admin", Password: "...", DBName: "staging",
+        },
+        OutputDir:    "/tmp/migration",
+        BackupUnique: true,
+        Logger:       logger,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    log.Printf("schema=%s drop=%s restore=%s",
+        result.SchemaFile, result.DropFile, result.RestoreFile)
+}
+```
+
+The `pg_dump` and `psql` binaries must still be available on the host (or pass explicit paths via `Options.PgDumpPath` / `Options.PsqlPath`). Loading config from TOML/JSON and prompting for passwords are CLI concerns and are not part of the library.
 
 ## Building
 
