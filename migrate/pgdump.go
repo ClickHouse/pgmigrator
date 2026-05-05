@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 )
 
-func dumpSourceSchema(ctx context.Context, pgDumpPath string, src *PGConfig) (string, error) {
-	filename := fmt.Sprintf("source-schema-dump-%s.sql", time.Now().Format("02_01_06_15_04_05"))
+func dumpSourceSchema(ctx context.Context, pgDumpPath string, src *PGConfig, outDir string) (string, error) {
+	filename := filepath.Join(
+		outDir,
+		fmt.Sprintf("source-schema-dump-%s.sql", time.Now().Format("02_01_06_15_04_05")),
+	)
 
 	//nolint:gosec // args are from validated config, not user shell input
 	cmd := exec.CommandContext(ctx, pgDumpPath,

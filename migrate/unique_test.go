@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ClickHouse/pgmigrator/internal/migrate"
+	"github.com/ClickHouse/pgmigrator/migrate"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
