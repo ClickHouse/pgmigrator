@@ -15,20 +15,33 @@ var version = "dev"
 var commit = "unknown" //nolint:gochecknoglobals // set by -ldflags at build time
 
 func run() error {
-	logFile, logErr := os.OpenFile("pgmigrator.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if logErr != nil {
-		return fmt.Errorf("opening log file: %w", logErr)
-	}
-	defer logFile.Close()
-
-	consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr}
-	multi := io.MultiWriter(consoleWriter, logFile)
-	log := zerolog.New(multi).With().Timestamp().Logger()
+	var log zerolog.Logger
 
 	app := &cli.Command{
 		Name:    "pgmigrator",
 		Usage:   "PostgreSQL migration tool",
 		Version: version + " (" + commit + ")",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "log-file",
+				Usage: "path to log file (if not set, logs only to stderr)",
+			},
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr}
+			logFilePath := cmd.String("log-file")
+			if logFilePath != "" {
+				logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+				if err != nil {
+					return ctx, fmt.Errorf("opening log file: %w", err)
+				}
+				multi := io.MultiWriter(consoleWriter, logFile)
+				log = zerolog.New(multi).With().Timestamp().Logger()
+			} else {
+				log = zerolog.New(consoleWriter).With().Timestamp().Logger()
+			}
+			return ctx, nil
+		},
 		Commands: []*cli.Command{
 			{
 				Name:  "init",
@@ -65,7 +78,7 @@ func run() error {
 					},
 					&cli.BoolFlag{
 						Name:  "backup-unique",
-						Value: true,
+						Value: false,
 						Usage: "backup unique constraints and indexes from target to a SQL file",
 					},
 				},
