@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/ClickHouse/pgmigrator/internal/migrate"
+	"github.com/ClickHouse/pgmigrator/migrate"
 	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v3"
 )
@@ -83,12 +83,25 @@ func run() error {
 					},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return migrate.Run(ctx, log, migrate.Options{
-						ConfigPath:   cmd.String("config"),
+					cfg, err := loadConfig(cmd.String("config"))
+					if err != nil {
+						return err
+					}
+
+					if promptErr := promptMissingPasswords(cfg); promptErr != nil {
+						return promptErr
+					}
+
+					_, runErr := migrate.Run(ctx, migrate.Options{
+						Source:       cfg.Source,
+						Target:       cfg.Target,
 						PgDumpPath:   cmd.String("pg-dump"),
 						PsqlPath:     cmd.String("psql"),
+						OutputDir:    ".",
 						BackupUnique: cmd.Bool("backup-unique"),
+						Logger:       log,
 					})
+					return runErr
 				},
 			},
 		},
