@@ -103,7 +103,7 @@ func promptMissingPasswords(cfg *Config) error {
 func promptPassword(label string) (string, error) {
 	fmt.Fprintf(os.Stderr, "Enter password for %s: ", label)
 
-	password, err := term.ReadPassword(int(os.Stdin.Fd())) //nolint:gosec // stdin fd fits in int
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
 
 	fmt.Fprintln(os.Stderr)
 
